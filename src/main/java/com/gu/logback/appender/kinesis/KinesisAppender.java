@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.client.builder.AwsAsyncClientBuilder;
 import com.amazonaws.services.kinesis.AmazonKinesisAsyncClient;
 import com.amazonaws.services.kinesis.model.DescribeStreamResult;
 import com.amazonaws.services.kinesis.model.PutRecordRequest;
@@ -43,9 +44,12 @@ public class KinesisAppender<Event extends DeferredProcessingAware>
   private KinesisStatsReporter asyncCallHander = new KinesisStatsReporter(this);
 
   @Override
-  protected AmazonKinesisAsyncClient createClient(AWSCredentialsProvider credentials, ClientConfiguration configuration,
-      ThreadPoolExecutor executor) {
-    return new AmazonKinesisAsyncClient(credentials, configuration, executor);
+  protected AwsAsyncClientBuilder createClient(AWSCredentialsProvider credentials, ClientConfiguration configuration,
+                                               ThreadPoolExecutor executor) {
+    return AmazonKinesisAsyncClient.asyncBuilder()
+            .withCredentials(credentials)
+            .withClientConfiguration(configuration)
+            .withExecutorFactory(() -> executor);
   }
 
   @Override

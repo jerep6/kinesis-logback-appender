@@ -20,6 +20,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.client.builder.AwsAsyncClientBuilder;
 import com.amazonaws.services.kinesisfirehose.AmazonKinesisFirehoseAsyncClient;
 import com.amazonaws.services.kinesisfirehose.model.DeliveryStreamStatus;
 import com.amazonaws.services.kinesisfirehose.model.DescribeDeliveryStreamRequest;
@@ -46,9 +47,12 @@ public class FirehoseAppender<Event extends DeferredProcessingAware>
   private FirehoseStatsReporter asyncCallHandler = new FirehoseStatsReporter(this);
 
   @Override
-  protected AmazonKinesisFirehoseAsyncClient createClient(AWSCredentialsProvider credentials,
+  protected AwsAsyncClientBuilder createClient(AWSCredentialsProvider credentials,
       ClientConfiguration configuration, ThreadPoolExecutor executor) {
-    return new AmazonKinesisFirehoseAsyncClient(credentials, configuration, executor);
+    return AmazonKinesisFirehoseAsyncClient.asyncBuilder()
+            .withCredentials(credentials)
+            .withClientConfiguration(configuration)
+            .withExecutorFactory(() -> executor);
   }
 
   @Override

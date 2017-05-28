@@ -4,26 +4,28 @@
  */
 package com.gu.logback.appender.kinesis;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
+import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.LayoutBase;
+import ch.qos.logback.core.spi.DeferredProcessingAware;
 import com.amazonaws.AmazonWebServiceClient;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.STSAssumeRoleSessionCredentialsProvider;
+import com.amazonaws.client.builder.AwsAsyncClientBuilder;
+import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.retry.PredefinedRetryPolicies;
 import com.amazonaws.retry.RetryPolicy;
+import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder;
 import com.gu.logback.appender.kinesis.helpers.BlockFastProducerPolicy;
 import com.gu.logback.appender.kinesis.helpers.CustomCredentialsProviderChain;
 import com.gu.logback.appender.kinesis.helpers.Validator;
 
-import ch.qos.logback.core.AppenderBase;
-import ch.qos.logback.core.LayoutBase;
-import ch.qos.logback.core.spi.DeferredProcessingAware;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Base class for Kinesis and Kinesis Firehose appenders containing common
@@ -56,10 +58,10 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Configures appender instance and makes it ready for use by the consumers.
    * It validates mandatory parameters and confirms if the configured stream is
    * ready for publishing data yet.
-   * 
+   *
    * Error details are made available through the fallback handler for this
    * appender
-   * 
+   *
    * @throws IllegalStateException if we encounter issues configuring this
    *           appender instance
    */
@@ -82,7 +84,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
     clientConfiguration
         .setRetryPolicy(new RetryPolicy(PredefinedRetryPolicies.DEFAULT_RETRY_CONDITION,
                                         PredefinedRetryPolicies.DEFAULT_BACKOFF_STRATEGY, maxRetries, true));
-    clientConfiguration.setUserAgent(AppenderConstants.USER_AGENT_STRING);
+    clientConfiguration.setUserAgentPrefix(AppenderConstants.USER_AGENT_STRING);
 
     BlockingQueue<Runnable> taskBuffer = new LinkedBlockingDeque<Runnable>(bufferSize);
     threadPoolExecutor = new ThreadPoolExecutor(threadCount, threadCount,
@@ -90,16 +92,18 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
                                                 taskBuffer, new BlockFastProducerPolicy());
     threadPoolExecutor.prestartAllCoreThreads();
 
-    this.client = createClient(credentials, clientConfiguration, threadPoolExecutor);
+    AwsAsyncClientBuilder builder = createClient(credentials, clientConfiguration, threadPoolExecutor);
 
-    client.setRegion(findRegion());
+    builder.withRegion(findRegion());
     if(!Validator.isBlank(endpoint)) {
       if(!Validator.isBlank(region)) {
         addError("Received configuration for both region as well as Amazon Kinesis endpoint. (" + endpoint
                  + ") will be used as endpoint instead of default endpoint for region (" + region + ")");
       }
-      client.setEndpoint(endpoint);
+      builder.withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(endpoint, findRegion()));
     }
+
+    this.client = (Client) builder.build();
 
     validateStreamName(client, streamName);
 
@@ -148,7 +152,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * as long as the buffer is not full (as per user configuration). This call
    * will block if internal buffer is full until internal threads create some
    * space by publishing some of the records.
-   * 
+   *
    * If there is any error in parsing logevents, those logevents would be
    * dropped.
    */
@@ -171,7 +175,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
 
   /**
    * Send message to client
-   * 
+   *
    * @param message formatted message to send
    * @throws Exception if unable to add message
    */
@@ -180,20 +184,20 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   /**
    * Determine region. If not specified tries to determine region from where the
    * application is running or fall back to the default.
-   * 
+   *
    * @return Region to configure the client
    */
-  private Region findRegion() {
+  private String findRegion() {
     boolean regionProvided = !Validator.isBlank(this.region);
     if(!regionProvided) {
       // Determine region from where application is running, or fall back to default region
       Region currentRegion = Regions.getCurrentRegion();
       if(currentRegion != null) {
-        return currentRegion;
+        return currentRegion.getName();
       }
-      return Region.getRegion(Regions.fromName(AppenderConstants.DEFAULT_REGION));
+      return AppenderConstants.DEFAULT_REGION;
     }
-    return Region.getRegion(Regions.fromName(this.region));
+    return this.region;
   }
 
   public LayoutBase<Event> getLayout() {
@@ -364,11 +368,9 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
     this.roleToAssumeArn = roleToAssumeArn;
     if(!Validator.isBlank(roleToAssumeArn)) {
       String sessionId = "session" + Math.random();
-      STSAssumeRoleSessionCredentialsProvider remoteAccountCredentials = new STSAssumeRoleSessionCredentialsProvider(credentials,
-                                                                                                                     roleToAssumeArn,
-                                                                                                                     sessionId);
-
-      credentials = remoteAccountCredentials;
+      credentials = new STSAssumeRoleSessionCredentialsProvider.Builder(roleToAssumeArn, sessionId)
+              .withStsClient(AWSSecurityTokenServiceClientBuilder.standard().withRegion(findRegion()).build())
+              .build();
     }
   }
 
@@ -424,7 +426,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
     this.initializationFailed = initializationFailed;
   }
 
-  protected abstract Client createClient(AWSCredentialsProvider credentials, ClientConfiguration configuration,
+  protected abstract AwsAsyncClientBuilder createClient(AWSCredentialsProvider credentials, ClientConfiguration configuration,
       ThreadPoolExecutor executor);
 
   protected Client getClient() {
