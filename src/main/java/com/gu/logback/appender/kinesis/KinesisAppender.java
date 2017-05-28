@@ -19,6 +19,7 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.client.builder.AwsAsyncClientBuilder;
@@ -38,7 +39,7 @@ import ch.qos.logback.core.spi.DeferredProcessingAware;
  * More details are available
  * <a href="https://github.com/guardian/kinesis-logback-appender">here</a>
  */
-public class KinesisAppender<Event extends DeferredProcessingAware>
+public class KinesisAppender<Event extends ILoggingEvent>
     extends BaseKinesisAppender<Event, AmazonKinesisAsyncClient> {
 
   private KinesisStatsReporter asyncCallHander = new KinesisStatsReporter(this);

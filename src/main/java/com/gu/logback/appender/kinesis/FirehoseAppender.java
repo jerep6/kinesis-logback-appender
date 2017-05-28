@@ -18,6 +18,7 @@ package com.gu.logback.appender.kinesis;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.client.builder.AwsAsyncClientBuilder;
@@ -41,7 +42,7 @@ import ch.qos.logback.core.spi.DeferredProcessingAware;
  * 
  * @since 1.4
  */
-public class FirehoseAppender<Event extends DeferredProcessingAware>
+public class FirehoseAppender<Event extends ILoggingEvent>
     extends BaseKinesisAppender<Event, AmazonKinesisFirehoseAsyncClient> {
 
   private FirehoseStatsReporter asyncCallHandler = new FirehoseStatsReporter(this);

@@ -4,9 +4,11 @@
  */
 package com.gu.logback.appender.kinesis;
 
+import ch.qos.logback.classic.pattern.CallerDataConverter;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.AppenderBase;
 import ch.qos.logback.core.LayoutBase;
-import ch.qos.logback.core.spi.DeferredProcessingAware;
 import com.amazonaws.AmazonWebServiceClient;
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSCredentialsProvider;
@@ -21,7 +23,10 @@ import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder
 import com.gu.logback.appender.kinesis.helpers.BlockFastProducerPolicy;
 import com.gu.logback.appender.kinesis.helpers.CustomCredentialsProviderChain;
 import com.gu.logback.appender.kinesis.helpers.Validator;
+import org.json.simple.JSONObject;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -30,10 +35,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * Base class for Kinesis and Kinesis Firehose appenders containing common
  * attributes,
- * 
+ *
  * @since 1.4
  */
-public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware, Client extends AmazonWebServiceClient>
+public abstract class BaseKinesisAppender<Event extends ILoggingEvent, Client extends AmazonWebServiceClient>
     extends AppenderBase<Event> {
 
   private String encoding = AppenderConstants.DEFAULT_ENCODING;
@@ -41,6 +46,9 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   private int bufferSize = AppenderConstants.DEFAULT_BUFFER_SIZE;
   private int threadCount = AppenderConstants.DEFAULT_THREAD_COUNT;
   private int shutdownTimeout = AppenderConstants.DEFAULT_SHUTDOWN_TIMEOUT_SEC;
+
+  /** Indicate if rich logging in JSON is enabled (log threadname, level, exception ...) */
+  private boolean jsonLogging = false;
 
   private String endpoint;
   private String region;
@@ -164,13 +172,37 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
       return;
     }
     try {
-      String message = this.layout.doLayout(logEvent);
-
-      putMessage(message);
+      putMessage(computeMessage(logEvent));
     }
     catch(Exception e) {
       addError("Failed to schedule log entry for publishing into Kinesis stream: " + streamName, e);
     }
+  }
+
+  private String computeMessage(Event logEvent) {
+    // Compute message
+    String message = "";
+    if(jsonLogging) {
+      final Map<String, String> data = new HashMap<>();
+      data.put("message", logEvent.getFormattedMessage());
+      data.put("logger", logEvent.getLoggerName());
+      data.put("thread", logEvent.getThreadName());
+      data.put("level", logEvent.getLevel().toString());
+
+      if (logEvent.hasCallerData()) {
+        data.put("caller", new CallerDataConverter().convert(logEvent));
+      }
+      if (logEvent.getThrowableProxy() != null) {
+        data.put("throwable", ThrowableProxyUtil.asString(logEvent.getThrowableProxy()));
+      }
+
+      JSONObject json = new JSONObject(data);
+      message = json.toString();
+    } else {
+      message = logEvent.getFormattedMessage();
+    }
+
+    return message;
   }
 
   /**
@@ -210,7 +242,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
 
   /**
    * Returns configured stream name
-   * 
+   *
    * @return configured stream name
    */
   public String getStreamName() {
@@ -219,7 +251,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
 
   /**
    * Sets streamName for the kinesis stream to which data is to be published.
-   * 
+   *
    * @param streamName name of the kinesis stream to which data is to be
    *          published.
    */
@@ -231,7 +263,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   /**
    * Configured encoding for the data to be published. If none specified,
    * default is UTF-8
-   * 
+   *
    * @return encoding for the data to be published. If none specified, default
    *         is UTF-8
    */
@@ -242,7 +274,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   /**
    * Sets encoding for the data to be published. If none specified, default is
    * UTF-8
-   * 
+   *
    * @param charset encoding for expected log messages
    */
   public void setEncoding(String charset) {
@@ -254,7 +286,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Returns configured maximum number of retries between API failures while
    * communicating with Kinesis. This is used in AWS SDK's default retries for
    * HTTP exceptions, throttling errors etc.
-   * 
+   *
    * @return configured maximum number of retries between API failures while
    *         communicating with Kinesis
    */
@@ -266,7 +298,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Configures maximum number of retries between API failures while
    * communicating with Kinesis. This is used in AWS SDK's default retries for
    * HTTP exceptions, throttling errors etc.
-   * 
+   *
    * @param maxRetries the number of retries between API failures
    */
   public void setMaxRetries(int maxRetries) {
@@ -278,7 +310,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Returns configured buffer size for this appender. This implementation would
    * buffer these many log events in memory while parallel threads are trying to
    * publish them to Kinesis.
-   * 
+   *
    * @return configured buffer size for this appender.
    */
   public int getBufferSize() {
@@ -301,7 +333,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   /**
    * Returns configured number of parallel thread count that would work on
    * publishing buffered events to Kinesis
-   * 
+   *
    * @return configured number of parallel thread count that would work on
    *         publishing buffered events to Kinesis
    */
@@ -327,7 +359,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * seconds and try to send all buffered records to Kinesis. However if it
    * fails to publish them before timeout, it would drop those records and exit
    * immediately after timeout.
-   * 
+   *
    * @return configured timeout for shutdown and clean up.
    */
   public int getShutdownTimeout() {
@@ -353,7 +385,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Returns count of tasks scheduled to send records to Kinesis. Since
    * currently each task maps to sending one record, it is equivalent to number
    * of records in the buffer scheduled to be sent to Kinesis.
-   * 
+   *
    * @return count of tasks scheduled to send records to Kinesis.
    */
   public int getTaskBufferSize() {
@@ -384,7 +416,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
 
   /**
    * Returns configured Kinesis endpoint.
-   * 
+   *
    * @return configured kinesis endpoint
    */
   public String getEndpoint() {
@@ -394,7 +426,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
   /**
    * Set kinesis endpoint. If set, it overrides the default kinesis endpoint in
    * the configured region
-   * 
+   *
    * @param endpoint kinesis endpoint to which requests should be made.
    */
   public void setEndpoint(String endpoint) {
@@ -403,7 +435,7 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
 
   /**
    * Returns configured region for Kinesis.
-   * 
+   *
    * @return configured region for Kinesis
    */
   public String getRegion() {
@@ -414,13 +446,18 @@ public abstract class BaseKinesisAppender<Event extends DeferredProcessingAware,
    * Configures the region and default endpoint for all Kinesis calls. If not
    * overridden by {@link #setEndpoint(String)}, all Kinesis requests are made
    * to the default endpoint in this region.
-   * 
+   *
    * @param region the Kinesis region whose endpoint should be used for kinesis
    *          requests
    */
   public void setRegion(String region) {
     this.region = region;
   }
+
+  protected void setJsonLogging(boolean jsonLogging) {
+    this.jsonLogging = jsonLogging;
+  }
+
 
   protected void setInitializationFailed(boolean initializationFailed) {
     this.initializationFailed = initializationFailed;
