@@ -25,6 +25,9 @@ import com.gu.logback.appender.kinesis.helpers.CustomCredentialsProviderChain;
 import com.gu.logback.appender.kinesis.helpers.Validator;
 import org.json.simple.JSONObject;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -49,6 +52,8 @@ public abstract class BaseKinesisAppender<Event extends ILoggingEvent, Client ex
 
   /** Indicate if rich logging in JSON is enabled (log threadname, level, exception ...) */
   private boolean jsonLogging = false;
+  /** To format timestamp to human readble date */
+  private DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.systemDefault());
 
   private String endpoint;
   private String region;
@@ -179,11 +184,13 @@ public abstract class BaseKinesisAppender<Event extends ILoggingEvent, Client ex
     }
   }
 
+
   private String computeMessage(Event logEvent) {
     // Compute message
     String message = "";
     if(jsonLogging) {
       final Map<String, String> data = new HashMap<>();
+      data.put("@timestamp", String.valueOf(dateFormatter.format(Instant.ofEpochMilli(logEvent.getTimeStamp()))));
       data.put("message", logEvent.getFormattedMessage());
       data.put("logger", logEvent.getLoggerName());
       data.put("thread", logEvent.getThreadName());
@@ -194,6 +201,10 @@ public abstract class BaseKinesisAppender<Event extends ILoggingEvent, Client ex
       }
       if (logEvent.getThrowableProxy() != null) {
         data.put("throwable", ThrowableProxyUtil.asString(logEvent.getThrowableProxy()));
+      }
+
+      for (Map.Entry<String, String> entry : logEvent.getMDCPropertyMap().entrySet()) {
+        data.put(entry.getKey(), entry.getValue());
       }
 
       JSONObject json = new JSONObject(data);
